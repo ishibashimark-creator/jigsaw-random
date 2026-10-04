@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ジグソーパズル（フォルダーからランダム出題）</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#f3efe6;--panel:#fffdf8;--fg:#2b2620;--muted:#7a7166;--accent:#1f6f6b;--accent-fg:#fff;--table:#c9b99a;--line:#d8cfbe}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1a1714;--panel:#26221e;--fg:#ece5d8;--muted:#a39a8c;--accent:#4fb3ad;--accent-fg:#10201f;--table:#3a332a;--line:#3d362d}}
+:root[data-theme="dark"]{--bg:#1a1714;--panel:#26221e;--fg:#ece5d8;--muted:#a39a8c;--accent:#4fb3ad;--accent-fg:#10201f;--table:#3a332a;--line:#3d362d}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%;margin:0}
+body{height:100dvh;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;background:var(--bg);color:var(--fg);font-family:"Hiragino Sans","Yu Gothic","Meiryo",system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden}
+[hidden]{display:none!important}
+#bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+#bar h1{font-size:17px;margin:0 8px 0 0;font-weight:700;letter-spacing:.04em}
+button,.btn,select{touch-action:manipulation;font:inherit;font-size:14px;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 12px;cursor:pointer}
+.btn.main{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+button:focus-visible,.btn:focus-within,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#stat{flex:1 1 auto;justify-content:flex-end;display:flex;align-items:baseline;gap:10px;min-width:0;font-size:13px;color:var(--muted)}
+#fname{color:var(--fg);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:min(40vw,320px)}
+#info{font-variant-numeric:tabular-nums;white-space:nowrap}
+#wrap{position:relative;flex:1;min-height:0;background:var(--table);overflow:hidden}
+#scroll{position:absolute;inset:0;overflow:auto;display:flex;padding:8px;box-sizing:border-box}
+#stage{position:relative;flex:none;margin:auto;background:rgba(255,255,255,.3);outline:2px dashed var(--line);outline-offset:0;touch-action:none;user-select:none;-webkit-user-select:none}
+#stage::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:99990;
+background-size:var(--cw) var(--ch);
+background-image:
+linear-gradient(to right,transparent calc(100% - 2px),rgba(0,0,0,.45) calc(100% - 2px) calc(100% - 1px),rgba(255,255,255,.65) calc(100% - 1px)),
+linear-gradient(to bottom,transparent calc(100% - 2px),rgba(0,0,0,.45) calc(100% - 2px) calc(100% - 1px),rgba(255,255,255,.65) calc(100% - 1px))}
+.piece{position:absolute;left:0;top:0;touch-action:none;cursor:grab}
+.piece canvas{display:block;pointer-events:none}
+.piece i{position:absolute;inset:0;box-sizing:border-box;border:1px solid rgba(0,0,0,.4);pointer-events:none;transition:border-color .15s ease,border-width .15s ease,box-shadow .15s ease}
+.piece{transition:transform .12s ease-out}
+.piece.drag{filter:brightness(1.1);cursor:grabbing;transition:none}
+.piece.drag i{transition:none}
+@keyframes pieceJoin{0%{box-shadow:0 0 0 5px var(--accent),0 0 18px 7px var(--accent)}100%{box-shadow:0 0 0 5px var(--accent),0 0 0 0 transparent}}
+.piece.join i{animation:pieceJoin .55s ease-out}
+#hint{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none;color:var(--fg);text-align:center;padding:20px}
+#hint b{font-size:20px}
+#hint span{color:var(--muted);font-size:14px}
+@media (max-width:640px){
+#bar{padding:8px 10px;gap:6px 8px}
+#bar h1{font-size:15px;margin:0}
+button,.btn,select{padding:6px 10px;font-size:13px}
+#stat{flex:1 1 100%;margin:0;font-size:12px}
+#fname{max-width:50vw}
+#scroll{padding:8px}
+#hint b{font-size:17px}
+}
+#peek{position:absolute;right:10px;bottom:10px;width:min(30vw,180px);height:auto;border:3px solid var(--panel);border-radius:4px;pointer-events:none;z-index:99999;box-shadow:0 2px 10px rgba(0,0,0,.35)}
+#win{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);z-index:99998}
+#win div{background:var(--panel);padding:24px 32px;border-radius:10px;text-align:center}
+#win b{display:block;font-size:24px;margin-bottom:6px}
+#win p{margin:0 0 14px;color:var(--muted)}
+#win #winName{margin:0 0 4px;color:var(--fg);font-weight:600;word-break:break-all}
+#win div{max-width:86vw}
+#over{position:absolute;inset:0;border:3px dashed var(--accent);pointer-events:none;z-index:99997}
+</style>
+</head>
+<body>
+<div id="bar">
+  <h1>ジグソーパズル</h1>
+  <button class="btn main" id="folder">フォルダーを選ぶ</button>
+  <input id="dir" type="file" webkitdirectory multiple hidden>
+  <button id="last" hidden></button>
+  <button id="next">次の問題</button>
+  <select id="n" aria-label="分割数"><option value="9">9分割</option><option value="16">16分割</option><option value="36">36分割</option></select>
+  <button id="shuffle">やり直す</button>
+  <button id="peekBtn" aria-pressed="false">見本</button>
+  <span id="stat"><span id="fname"></span><span id="info"></span></span>
+</div>
+<div id="wrap">
+  <div id="scroll"><div id="stage"></div></div>
+  <div id="hint"><b>「フォルダーを選ぶ」で、画像の入ったフォルダーを選んでください</b><span>このファイルと同じフォルダーを選べば、その中の画像（jpg・png・webp など）から<br>ランダムに1枚を選んで出題します。ピースを別のピースの上に置くと入れ替わります</span></div>
+  <canvas id="peek" hidden></canvas>
+  <div id="win" hidden><div><b>完成！</b><p id="winName"></p><p id="winMsg"></p><button class="btn main" id="again">次の問題</button></div></div>
+  <div id="over" hidden></div>
+</div>
+<script>
+const $=s=>document.querySelector(s), stage=$('#stage'), wrap=$('#wrap');
+const D=[[-1,0],[1,0],[0,-1],[0,1]];
+let src=null,img=null,pieces=[],cols=3,rows=3,pw=0,ph=0,z=1,moves=0,t0=0,timer=null,done=false,drag=null,fileName='',winAt=0;
+
+function fromCanvas(c){
+  try{
+    img={w:c.width,h:c.height}; src=c;
+    $('#fname').textContent=fileName;
+    const pk=$('#peek'); pk.width=c.width; pk.height=c.height; pk.getContext('2d').drawImage(c,0,0);
+    $('#hint').hidden=true; start();
+  }catch(e){alert('パズルの作成に失敗しました: '+e.message);}
+}
+function readImage(f){
+  return new Promise((ok,ng)=>{
+    const u=URL.createObjectURL(f),im=new Image();
+    im.onerror=()=>{URL.revokeObjectURL(u);ng(new Error('decode'));};
+    im.onload=()=>{
+      const W=im.naturalWidth,H=im.naturalHeight;
+      if(!W||!H){URL.revokeObjectURL(u);return ng(new Error('size'));}
+      const k=Math.min(1,2400/Math.max(W,H)),c=document.createElement('canvas');
+      c.width=Math.round(W*k);c.height=Math.round(H*k);
+      const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(im,0,0,c.width,c.height);
+      URL.revokeObjectURL(u); ok(c);
+    };
+    im.src=u;
+  });
+}
+// 画像の縦横比に合わせて、ピースが正方形に近くなる列数×行数を選ぶ（枚数は目標に近いもの）
+function pickGrid(T,W,H){
+  let best=null;
+  for(let c=2;c<=16;c++)for(let r=2;r<=16;r++){
+    if(c*r<4) continue;
+    const sc=3*Math.abs(Math.log(c*r/T))+2*Math.abs(Math.log((W/c)/(H/r)));
+    if(!best||sc<best.sc) best={c,r,sc};
+  }
+  return best;
+}
+// 表示サイズを決める：元の画像サイズ。ただし画面に収まらないときは縮小
+function fit(){
+  const aw=wrap.clientWidth-16,ah=wrap.clientHeight-16,k=Math.min(4,aw/img.w,ah/img.h);
+  pw=Math.max(8,Math.floor(img.w*k/cols)); ph=Math.max(8,Math.floor(img.h*k/rows));
+  stage.style.width=pw*cols+'px'; stage.style.height=ph*rows+'px';
+  stage.style.setProperty('--cw',pw+'px'); stage.style.setProperty('--ch',ph+'px');
+}
+function draw(p){
+  const dpr=Math.min(2,window.devicePixelRatio||1),cv=p.cv;
+  const sx=Math.round(p.c*img.w/cols),sy=Math.round(p.r*img.h/rows);
+  const sw=Math.round((p.c+1)*img.w/cols)-sx,sh=Math.round((p.r+1)*img.h/rows)-sy;
+  p.el.style.width=pw+'px'; p.el.style.height=ph+'px';
+  cv.width=Math.round(pw*dpr); cv.height=Math.round(ph*dpr);
+  cv.style.width=pw+'px'; cv.style.height=ph+'px';
+  const g=cv.getContext('2d'); g.imageSmoothingQuality='high';
+  g.drawImage(src,sx,sy,sw,sh,0,0,cv.width,cv.height);
+}
+function start(){
+  if(!src) return;
+  const g=pickGrid(+$('#n').value,img.w,img.h); cols=g.c; rows=g.r;
+  stage.innerHTML=''; pieces=[]; moves=0; done=false; $('#win').hidden=true;
+  fit();
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    const el=document.createElement('div');el.className='piece';el.dataset.i=r*cols+c;
+    const cv=document.createElement('canvas'),edge=document.createElement('i');
+    el.append(cv,edge); stage.appendChild(el);
+    const p={r,c,g:r*cols+c,x:0,y:0,el,cv,edge}; pieces.push(p); draw(p);
+  }
+  // 各ピースをマス目にシャッフル配置（重ならず、どのピースも元の位置にならない）
+  let perm;
+  do{perm=[...pieces.keys()];for(let i=perm.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[perm[i],perm[j]]=[perm[j],perm[i]];}}
+  while(perm.some((v,i)=>v===i));
+  pieces.forEach((p,i)=>{p.x=(perm[i]%cols)*pw;p.y=Math.floor(perm[i]/cols)*ph;});
+  // たまたま正しく隣り合ったピースは最初から結合
+  pieces.forEach(place); regroup(); refresh();
+  clearInterval(timer); t0=Date.now(); timer=setInterval(info,500); info();
+}
+// 画面サイズが変わったとき（スマホの回転など）は、配置を保ったまま大きさだけ変える
+let rt;
+addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(relayout,150);});
+function relayout(){
+  if(!src||drag||!pieces.length) return;
+  const opw=pw,oph=ph,cells=pieces.map(p=>cellOf(p.x,p.y));
+  fit(); if(pw===opw&&ph===oph) return;
+  pieces.forEach((p,i)=>{p.y=cells[i][0]*ph;p.x=cells[i][1]*pw;draw(p);place(p);});
+}
+const place=p=>p.el.style.transform=`translate(${p.x}px,${p.y}px)`;
+function info(){
+  const blocks=new Set(pieces.map(p=>p.g)).size, s=Math.floor(((done?done:Date.now())-t0)/1000);
+  $('#info').textContent=`${cols}×${rows}枚 ／ ブロック ${blocks} ／ 手数 ${moves} ／ ${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+}
+function refresh(){
+  const size={}; pieces.forEach(p=>{size[p.g]=(size[p.g]||0)+1;});
+  const sides=[['Top',-1,0],['Bottom',1,0],['Left',0,-1],['Right',0,1]];
+  for(const p of pieces){
+    const multi=size[p.g]>1;              // 2枚以上つながった塊かどうか
+    for(const [side,dr,dc] of sides){
+      const r=p.r+dr,c=p.c+dc,ok=r>=0&&c>=0&&r<rows&&c<cols&&pieces[r*cols+c].g===p.g;
+      if(ok){                              // 塊の内側の継ぎ目は消して一枚に見せる
+        p.edge.style['border'+side+'Color']='transparent';
+        p.edge.style['border'+side+'Width']='';
+      }else if(multi){                     // 塊の外周は、明るい太線で縁取って目立たせる
+        p.edge.style['border'+side+'Color']='var(--accent)';
+        p.edge.style['border'+side+'Width']='3px';
+      }else{                               // まだどこともつながっていない1枚は、通常の線
+        p.edge.style['border'+side+'Color']='';
+        p.edge.style['border'+side+'Width']='';
+      }
+    }
+  }
+}
+stage.addEventListener('pointerdown',e=>{
+  const el=e.target.closest('.piece'); if(!el||done||drag||(e.pointerType==='mouse'&&e.button!==0)) return;
+  const p=pieces[el.dataset.i],grp=pieces.filter(q=>q.g===p.g);
+  grp.forEach(q=>{q.el.style.zIndex=++z;q.el.classList.add('drag');});
+  const xs=grp.map(q=>q.x),ys=grp.map(q=>q.y);
+  drag={grp,dx:0,dy:0,sx:e.clientX,sy:e.clientY,ox:xs,oy:ys,
+    x0:-Math.min(...xs),x1:stage.clientWidth-pw-Math.max(...xs),
+    y0:-Math.min(...ys),y1:stage.clientHeight-ph-Math.max(...ys)};
+  stage.setPointerCapture(e.pointerId); e.preventDefault();
+});
+stage.addEventListener('pointermove',e=>{
+  if(!drag) return;
+  const dx=Math.max(drag.x0,Math.min(drag.x1,Math.round(e.clientX-drag.sx)));
+  const dy=Math.max(drag.y0,Math.min(drag.y1,Math.round(e.clientY-drag.sy)));
+  drag.dx=dx;drag.dy=dy;
+  drag.grp.forEach((q,i)=>{q.x=drag.ox[i]+dx;q.y=drag.oy[i]+dy;place(q);});
+});
+function end(){
+  if(!drag) return;
+  const d=drag; drag=null;
+  d.grp.forEach(q=>q.el.classList.remove('drag'));
+  drop(d); moves++; refresh();
+  if(new Set(pieces.map(p=>p.g)).size===1){
+    done=Date.now(); clearInterval(timer);
+    const s=Math.floor((done-t0)/1000);
+    $('#winName').textContent=fileName;
+    $('#winMsg').textContent=`${Math.floor(s/60)}分${s%60}秒 ／ ${moves}手`;
+    $('#win').hidden=false; winAt=Date.now();
+  }
+  info();
+}
+stage.addEventListener('contextmenu',e=>e.preventDefault());
+stage.addEventListener('pointerup',end);
+stage.addEventListener('pointercancel',end);
+function nb(p,fn){
+  for(const [dr,dc] of D){const r=p.r+dr,c=p.c+dc;
+    if(r>=0&&c>=0&&r<rows&&c<cols) if(fn(pieces[r*cols+c],dr,dc)) return;}
+}
+const cellOf=(x,y)=>[Math.round(y/ph),Math.round(x/pw)];
+// ドロップ：塊をマス目に吸着させ、押し出されたピースは元の位置側へ入れ替える
+function drop(d){
+  const sc=Math.round(d.dx/pw),sr=Math.round(d.dy/ph),G=d.grp,mine=new Set(G);
+  if(!sc&&!sr){G.forEach((q,i)=>{q.x=d.ox[i];q.y=d.oy[i];place(q);});return;}
+  const to=G.map((_,i)=>{const [r,c]=cellOf(d.ox[i],d.oy[i]);return [r+sr,c+sc];});
+  const k=(r,c)=>r+','+c,T=new Set(to.map(([r,c])=>k(r,c))),at={},out=[];
+  pieces.forEach(p=>{if(!mine.has(p)){const [r,c]=cellOf(p.x,p.y);at[k(r,c)]=p;}});
+  for(const [r,c] of to){
+    const p=at[k(r,c)]; if(!p) continue;
+    let a=r,b=c; do{a-=sr;b-=sc;}while(T.has(k(a,b)));
+    out.push([p,a,b]);
+  }
+  G.forEach((q,i)=>{q.y=to[i][0]*ph;q.x=to[i][1]*pw;});
+  out.forEach(([p,a,b])=>{p.y=a*ph;p.x=b*pw;});
+  pieces.forEach(place);
+  const oldG=new Map(pieces.map(p=>[p,p.g])),oldSize={};
+  pieces.forEach(p=>{oldSize[p.g]=(oldSize[p.g]||0)+1;});
+  regroup();
+  const newSize={}; pieces.forEach(p=>{newSize[p.g]=(newSize[p.g]||0)+1;});
+  pieces.forEach(p=>{                      // このひと手で新しくつながったピースだけを光らせる
+    if(newSize[p.g]>oldSize[oldG.get(p)]){
+      p.el.classList.remove('join'); void p.el.offsetWidth; p.el.classList.add('join');
+    }
+  });
+}
+// 正しい隣同士がマス目で隣り合っているピースを、ひとつの塊にまとめる
+function regroup(){
+  const at={},par=pieces.map((_,i)=>i),f=i=>par[i]===i?i:(par[i]=f(par[i]));
+  pieces.forEach(p=>{const [r,c]=cellOf(p.x,p.y);at[r+','+c]=p;});
+  pieces.forEach((p,i)=>{const [r,c]=cellOf(p.x,p.y);
+    nb(p,(q,dr,dc)=>{if(at[(r+dr)+','+(c+dc)]===q)par[f(q.r*cols+q.c)]=f(i);});});
+  pieces.forEach((p,i)=>p.g=f(i));
+}
+// 完成ポップアップは、どこかをクリック／タップすると閉じる（表示直後のクリックは無視）
+document.addEventListener('click',()=>{if(!$('#win').hidden&&Date.now()-winAt>500)$('#win').hidden=true;});
+$('#n').onchange=start; $('#shuffle').onclick=start; $('#again').onclick=nextProblem; $('#next').onclick=nextProblem; $('#folder').onclick=chooseFolder;
+$('#peekBtn').onclick=e=>{if(!src)return;const h=$('#peek').hidden=!$('#peek').hidden;e.target.setAttribute('aria-pressed',!h);};
+wrap.addEventListener('dragover',e=>{e.preventDefault();$('#over').hidden=false;});
+wrap.addEventListener('dragleave',()=>$('#over').hidden=true);
+wrap.addEventListener('drop',e=>{e.preventDefault();$('#over').hidden=true;onFiles(e.dataTransfer.files);});
+
+// ===== フォルダーから出題 =====
+const IMG=/\.(jpe?g|png|gif|webp|bmp|avif)$/i, baseName=n=>n.replace(/\.[^.]+$/,'');
+let pool=[],bag=[],lastIdx=-1,busy=false,viaInput=!window.showDirectoryPicker;
+// 全部の画像を1回ずつ出し終えるまで、同じ画像は出さない
+function takeNext(){
+  if(!bag.length){
+    bag=pool.map((_,i)=>i);
+    for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]];}
+    if(bag.length>1&&bag[bag.length-1]===lastIdx) [bag[0],bag[bag.length-1]]=[bag[bag.length-1],bag[0]];
+  }
+  return bag.pop();
+}
+async function nextProblem(){
+  if(!pool.length) return chooseFolder();
+  if(busy) return; busy=true;
+  try{
+    for(let t=0;t<pool.length;t++){           // 読み込めない画像は飛ばす
+      const i=takeNext(),it=pool[i];
+      try{const c=await readImage(await it.file());fileName=baseName(it.name);lastIdx=i;fromCanvas(c);return;}catch(e){}
+    }
+    alert('読み込める画像が見つかりませんでした。');
+  }finally{busy=false;}
+}
+function setPool(items){
+  pool=items; bag=[]; lastIdx=-1;
+  if(!pool.length){alert('このフォルダーに画像ファイル（jpg・png・webp など）が見つかりませんでした。');return false;}
+  return true;
+}
+// <input webkitdirectory> や、ドロップされたファイルから（フォルダー直下の画像のみ）
+function onFiles(list){
+  const items=[...list].filter(f=>{
+    const rp=f.webkitRelativePath||'';
+    return IMG.test(f.name)&&(!rp||rp.split('/').length===2);
+  }).map(f=>({name:f.name,file:async()=>f}));
+  if(setPool(items)) nextProblem();
+}
+async function useDir(h){
+  const items=[];
+  for await(const [name,e] of h.entries()) if(e.kind==='file'&&IMG.test(name)) items.push({name,file:()=>e.getFile()});
+  return setPool(items);
+}
+async function chooseFolder(){
+  if(viaInput){$('#dir').click();return;}
+  try{
+    const h=await showDirectoryPicker({id:'jigsaw-random'});
+    saveHandle(h);
+    if(await useDir(h)) nextProblem();
+  }catch(e){
+    if(e.name==='AbortError') return;
+    viaInput=true;   // デスクトップ直下など、制限のあるフォルダーは通常の選択方式に切り替える
+    alert('このフォルダーはブラウザの制限で直接開けませんでした。もう一度ボタンを押すと、別の方法で選べます。');
+  }
+}
+$('#dir').onchange=e=>{onFiles(e.target.files);e.target.value='';};
+// 前回選んだフォルダーを覚えておく（Chrome/Edgeのみ）。許可が残っていれば、開いてすぐ出題する
+const idb=()=>new Promise((ok,ng)=>{const r=indexedDB.open('jigsaw-random',1);r.onupgradeneeded=()=>r.result.createObjectStore('h');r.onsuccess=()=>ok(r.result);r.onerror=()=>ng(r.error);});
+async function saveHandle(h){try{(await idb()).transaction('h','readwrite').objectStore('h').put(h,'dir');}catch(e){}}
+async function loadHandle(){
+  try{const d=await idb();return await new Promise(ok=>{const q=d.transaction('h').objectStore('h').get('dir');q.onsuccess=()=>ok(q.result||null);q.onerror=()=>ok(null);});}
+  catch(e){return null;}
+}
+(async()=>{
+  if(!window.showDirectoryPicker) return;
+  const h=await loadHandle(); if(!h) return;
+  const b=$('#last'); b.textContent='前回のフォルダー（'+h.name+'）'; b.hidden=false;
+  const go=async()=>{if(await useDir(h)){b.hidden=true;nextProblem();}};
+  b.onclick=async()=>{try{if(await h.requestPermission({mode:'read'})==='granted') await go();}catch(e){b.hidden=true;}};
+  try{if(await h.queryPermission({mode:'read'})==='granted') await go();}catch(e){}
+})();
+</script>
+</body>
+</html>
