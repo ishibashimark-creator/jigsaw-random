@@ -57,6 +57,13 @@ button,.btn,select{padding:6px 10px;font-size:13px}
 #win #winName{margin:0 0 4px;color:var(--fg);font-weight:600;word-break:break-all}
 #win div{max-width:86vw}
 #over{position:absolute;inset:0;border:3px dashed var(--accent);pointer-events:none;z-index:99997}
+#gmodal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.4);z-index:100000;padding:16px}
+#gmodal>div{background:var(--panel);border-radius:10px;padding:22px;max-width:440px;width:100%;max-height:90vh;overflow:auto}
+#gmodal h2{margin:0 0 10px;font-size:17px}
+#gmodal label{display:block;margin:12px 0 4px;font-size:13px;color:var(--muted)}
+#gmodal input{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
+#gmodal .note{font-size:12px;color:var(--muted);line-height:1.6;margin:8px 0}
+#gmodal .row{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
 </style>
 </head>
 <body>
@@ -66,6 +73,7 @@ button,.btn,select{padding:6px 10px;font-size:13px}
   <input id="dir" type="file" webkitdirectory multiple hidden>
   <button id="last" hidden></button>
   <button id="next">次の問題</button>
+  <button id="gdrive">Googleドライブ</button>
   <select id="n" aria-label="分割数"><option value="9">9分割</option><option value="16">16分割</option><option value="36">36分割</option></select>
   <button id="shuffle">やり直す</button>
   <button id="peekBtn" aria-pressed="false">見本</button>
@@ -77,6 +85,16 @@ button,.btn,select{padding:6px 10px;font-size:13px}
   <canvas id="peek" hidden></canvas>
   <div id="win" hidden><div><b>完成！</b><p id="winName"></p><p id="winMsg"></p><button class="btn main" id="again">次の問題</button></div></div>
   <div id="over" hidden></div>
+  <div id="gmodal" hidden>
+    <div>
+      <h2>Googleドライブのフォルダー</h2>
+      <p class="note">公開フォルダー（リンクを知っている全員が閲覧可）の共有リンクと、Google CloudのAPIキーを入力してください。入力内容はこの端末のブラウザ内にだけ保存されます。</p>
+      <label>フォルダーの共有リンク<input id="gurl" type="text" placeholder="https://drive.google.com/drive/folders/..."></label>
+      <label>APIキー<input id="gkey" type="text" placeholder="AIza..."></label>
+      <p class="note">APIキーは、Google Cloud Consoleの「APIとサービス」→「認証情報」で作成できます（Drive APIの有効化が必要です）。</p>
+      <div class="row"><button class="btn main" id="gok">読み込む</button><button id="gcancel">キャンセル</button></div>
+    </div>
+  </div>
 </div>
 <script>
 const $=s=>document.querySelector(s), stage=$('#stage'), wrap=$('#wrap');
@@ -336,6 +354,90 @@ async function loadHandle(){
   b.onclick=async()=>{try{if(await h.requestPermission({mode:'read'})==='granted') await go();}catch(e){b.hidden=true;}};
   try{if(await h.queryPermission({mode:'read'})==='granted') await go();}catch(e){}
 })();
+
+// ===== Googleドライブ（公開フォルダー）から出題 =====
+const LS_KEY='jigsaw-gdrive', $$=id=>document.getElementById(id);
+function gdriveSaved(){try{return JSON.parse(localStorage.getItem(LS_KEY)||'null');}catch(e){return null;}}
+function gdriveSave(v){try{localStorage.setItem(LS_KEY,JSON.stringify(v));}catch(e){}}
+function parseFolderId(s){
+  s=(s||'').trim();
+  let m=s.match(/\/folders\/([a-zA-Z0-9_-]+)/)||s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  return m?m[1]:(/^[a-zA-Z0-9_-]{10,}$/.test(s)?s:null);
+}
+function openGModal(){
+  const saved=gdriveSaved()||{};
+  $('#gurl').value=saved.url||''; $('#gkey').value=saved.key||'';
+  $('#gmodal').hidden=false; $('#gurl').focus();
+}
+$('#gdrive').onclick=openGModal;
+$('#gcancel').onclick=()=>{$('#gmodal').hidden=true;};
+$('#gmodal').addEventListener('click',e=>{if(e.target.id==='gmodal')$('#gmodal').hidden=true;});
+$('#gok').onclick=async()=>{
+  const url=$('#gurl').value.trim(),key=$('#gkey').value.trim(),folderId=parseFolderId(url);
+  if(!folderId) return alert('フォルダーの共有リンクを確認してください（.../folders/フォルダーID の形式です）。');
+  if(!key) return alert('APIキーを入力してください。');
+  gdriveSave({url,key});
+  $('#gmodal').hidden=true;
+  await loadFromGDrive(folderId,key);
+};
+// 共有ドライブ（チームドライブ）内のフォルダーも対象にする
+const DRIVE_EXTRA='&supportsAllDrives=true&includeItemsFromAllDrives=true';
+const SHORTCUT='application/vnd.google-apps.shortcut';
+// フォルダー直下の全ファイルを取得（画像かどうかは、あとで判定する）
+async function driveList(folderId,key){
+  const items=[]; let token='';
+  const fields='nextPageToken,files(id,name,mimeType,shortcutDetails(targetId,targetMimeType))';
+  do{
+    const q=encodeURIComponent(`'${folderId}' in parents and trashed=false`);
+    const u=`https://www.googleapis.com/drive/v3/files?q=${q}&fields=${fields}&pageSize=1000&key=${encodeURIComponent(key)}${DRIVE_EXTRA}${token?('&pageToken='+token):''}`;
+    let res;
+    try{res=await fetch(u);}
+    catch(e){throw new Error('通信できませんでした。このファイルをウェブサーバー経由で開いているか確認してください（file:// で直接開くと失敗することがあります）。');}
+    if(!res.ok){
+      const body=await res.json().catch(()=>({}));
+      const msg=body&&body.error&&body.error.message||res.status;
+      throw new Error('Googleドライブへの問い合わせに失敗しました（'+msg+'）。APIキーやDrive APIの有効化をご確認ください。');
+    }
+    const data=await res.json();
+    items.push(...(data.files||[]));
+    token=data.nextPageToken||'';
+  }while(token);
+  return items;
+}
+// 画像そのものと、画像を指す「ショートカット」の両方を、画像として扱う
+function toImageItem(f){
+  if(f.mimeType&&f.mimeType.startsWith('image/')) return {id:f.id,name:f.name};
+  const sd=f.shortcutDetails;
+  if(f.mimeType===SHORTCUT&&sd&&sd.targetMimeType&&sd.targetMimeType.startsWith('image/')) return {id:sd.targetId,name:f.name};
+  return null;
+}
+async function loadFromGDrive(folderId,key){
+  if(busy) return; busy=true;
+  let ok=false;
+  try{
+    const files=await driveList(folderId,key);
+    if(!files.length){
+      throw new Error('このフォルダーが見つからないか、公開されていません。フォルダーの「共有」設定が「リンクを知っている全員」になっているか、共有ドライブ内のフォルダーでないかをご確認ください。');
+    }
+    const images=files.map(toImageItem).filter(Boolean);
+    if(!images.length){
+      const shortcuts=files.filter(f=>f.mimeType===SHORTCUT).length;
+      throw new Error('このフォルダーは見つかりましたが、画像ファイルがありませんでした（他の形式のファイルが'+files.length+'件'+(shortcuts?'、うちショートカットが'+shortcuts+'件':'')+'）。画像ファイル自体の共有設定、またはショートカットの参照先の共有設定をご確認ください。');
+    }
+    const items=images.map(f=>({name:f.name,file:async()=>{
+      const r=await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media&key=${encodeURIComponent(key)}${DRIVE_EXTRA}`);
+      if(!r.ok) throw new Error('image fetch failed');
+      return r.blob();
+    }}));
+    ok=setPool(items);
+  }catch(e){
+    alert(e.message||'読み込みに失敗しました。');
+  }finally{busy=false;}
+  if(ok) nextProblem();
+}
+// 前回の入力があれば、ボタンのラベルで分かるようにしておく
+(()=>{const s=gdriveSaved(); if(s&&s.url) $('#gdrive').title='前回: '+s.url;})();
 </script>
 </body>
 </html>
+
